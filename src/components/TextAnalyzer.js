@@ -3,18 +3,20 @@ import axios from 'axios';
 
 function TextAnalyzer() {
   // Add PIM data state
-  const [pimData, setPimData] = useState([]);
-  const [input, setInput] = useState('');
-  const [result, setResult] = useState('');
-  const [tableResult, setTableResult] = useState('');  // Add this line
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
+  // Add new state variable at the top with other state declarations
+    const [pimData, setPimData] = useState([]);
+    const [input, setInput] = useState('');
+    const [result, setResult] = useState('');
+    const [tableResult, setTableResult] = useState('');
+    const [exactMatches, setExactMatches] = useState('');  // Add this line
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState(null);
 
   // Constants for Azure OpenAI
   const AZURE_ENDPOINT = "";
   const DEPLOYMENT_NAME = "gpt-4o-mini-s";
   const API_VERSION = "2024-02-01";
-  const API_KEY = "";
+  const API_KEY = ;
 
   // Move useEffect to component body level
   // In the useEffect where CSV is loaded
@@ -43,7 +45,7 @@ function TextAnalyzer() {
 
   const analyzeText = async () => {
     if (!input.trim()) {
-      setError('Please enter some text to analyze');
+      setError('Please enter text to analyze');
       return;
     }
 
@@ -87,6 +89,8 @@ function TextAnalyzer() {
               - For quantity, include units if specified
               - Set discount_mentioned to true if any discount is mentioned in the text
               - Ensure exact matches for part IDs
+              - Part ID contains only numbers
+              - If there is a space in part ID or Part name, remove all the space.
               - Return only the JSON object, no additional text like json`
             },
             {
@@ -106,10 +110,13 @@ function TextAnalyzer() {
         const resultText = response.data.choices[0].message.content;
         setResult(resultText);
         
+        // Modify the try block in analyzeText where parsedData is processed
         try {
           const parsedData = JSON.parse(resultText);
           if (parsedData.products && Array.isArray(parsedData.products)) {
-            const tableHeader = 'Match Type    Product Name   Product ID   Quantity\n----------------------------------------------------------\n';
+            const tableHeader = 'Match Type    Part Name   Part ID   Quantity\n----------------------------------------------------------\n';
+            let exactMatchResults = [];
+            
             const tableRows = parsedData.products.map(product => {
               let matches = [];
               
@@ -119,27 +126,38 @@ function TextAnalyzer() {
                 const exactIdMatch = pimData.find(item => String(item.part_id).trim() === searchId);
                 if (exactIdMatch) {
                   matches.push({ ...exactIdMatch, matchType: 'Exact' });
+                  const quantity = parseInt(product.quantity) || product.quantity;
+                  exactMatchResults.push(`${exactIdMatch.part_id} ${quantity}`);
                 }
               }
               
               // Try exact name match
               if (product.part_name && matches.length === 0) {
-                const searchName = product.part_name.toLowerCase().trim();
+                const searchName = product.part_name.toLowerCase().replace(/\s+/g, '');
                 const exactNameMatch = pimData.find(item => 
-                  item.part_name?.toLowerCase().trim() === searchName
+                  item.part_name_processed === searchName
                 );
                 if (exactNameMatch) {
                   matches.push({ ...exactNameMatch, matchType: 'Exact' });
+                  const quantity = parseInt(product.quantity) || product.quantity;
+                  exactMatchResults.push(`${exactNameMatch.part_id} ${quantity}`);
                 }
               }
               
               // Try partial matches
               if (matches.length === 0) {
+                const searchNameProcessed = product.part_name?.toLowerCase().replace(/\s+/g, '');
                 const partialMatches = pimData.filter(item => {
-                  const nameMatch = item.part_name && product.part_name &&
-                    item.part_name.toLowerCase().includes(product.part_name.toLowerCase());
+                  // Convert the item's part name to processed format for comparison
+                  const itemNameProcessed = item.part_name?.toLowerCase().replace(/\s+/g, '');
+                  
+                  if (!searchNameProcessed || !itemNameProcessed) return false;
+                  
+                  const nameMatch = itemNameProcessed.includes(searchNameProcessed) ||
+                                   searchNameProcessed.includes(itemNameProcessed);
                   const idMatch = item.part_id && product.part_id &&
-                    item.part_id.includes(product.part_id);
+                                 item.part_id.includes(product.part_id);
+                  
                   return nameMatch || idMatch;
                 });
                 matches.push(...partialMatches.map(match => ({ ...match, matchType: 'Possible' })));
@@ -156,6 +174,7 @@ function TextAnalyzer() {
             }).join('\n');
             
             setTableResult(tableHeader + tableRows);
+            setExactMatches(exactMatchResults.join('\n'));
           }
         } catch (parseError) {
           setTableResult('Error parsing product data');
@@ -174,6 +193,7 @@ function TextAnalyzer() {
     }
   };
 
+  // Add the new text box at the bottom of the return statement, after the flex container
   return (
     <div style={{ maxWidth: '800px', margin: '40px auto', padding: '20px' }}>
       <div style={{ marginBottom: '20px' }}>
@@ -186,7 +206,7 @@ function TextAnalyzer() {
           placeholder="Enter your text here..."
           style={{ 
             width: '100%', 
-            height: '200px', 
+            height: '100px',  // Changed from 200px to 100px
             padding: '10px', 
             marginBottom: '10px',
             borderRadius: '4px',
@@ -225,7 +245,7 @@ function TextAnalyzer() {
       </button>
 
       <div style={{ display: 'flex', gap: '20px' }}>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 4 }}>  {/* Changed from flex: 1 to flex: 4 for 40% */}
           <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold' }}>
             Extracted Information:
           </label>
@@ -244,14 +264,14 @@ function TextAnalyzer() {
           />
         </div>
 
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 6 }}>  {/* Changed from flex: 1 to flex: 6 for 60% */}
           <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold' }}>
             Product Table:
           </label>
           <textarea
             value={tableResult}
             readOnly
-            placeholder="Product table will appear here..."
+            placeholder="Part table will appear here..."
             style={{ 
               width: '100%', 
               height: '200px', 
@@ -263,6 +283,27 @@ function TextAnalyzer() {
             }}
           />
         </div>
+      </div>
+      
+      {/* Add this new section */}
+      <div style={{ marginTop: '20px' }}>
+        <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold' }}>
+          Exact Matches (Part ID: Quantity):
+        </label>
+        <textarea
+          value={exactMatches}
+          readOnly
+          placeholder="Only product IDs that exactly match those in the webshop will appear here..."
+          style={{ 
+            width: '100%', 
+            height: '100px', 
+            padding: '10px',
+            backgroundColor: '#f5f5f5',
+            borderRadius: '4px',
+            border: '1px solid #ccc',
+            fontFamily: 'monospace'
+          }}
+        />
       </div>
     </div>
   );
